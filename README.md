@@ -9,7 +9,8 @@ The file "system_effects_in_VoI.jl" is a Julia file that contains all of the cal
  - Defining influence diagrams
  - Running VoI calculations
  
-Abstract
+Abstract:
+
 Structural Health Monitoring (SHM) technologies offer much promise to the risk management of the built environment, and they are justifiably an active area of research. SHM provides opportunities to collect large amounts of data about the local environment, including measurements of strains at key locations. However, this data alone (even when coupled with the state of the art in statistical analysis) is only related to one aspect of structural integrity management. Information regarding material properties, such as toughness and strength, cannot presently be monitored using sensors, but are measured in destructive lab tests. Similarly, the presence or emergence of geometrical anomalies require inspection for detection and sizing.
 
 Value of Information (VoI) analysis is an established statistical framework for quantifying the utility of a prospective data collection activity in the context of solving an underlying decision problem. VoI can be used to identify how much engineering teams should be willing to pay for material testing, inspection and SHM to support the risk management of the built environment. In this paper, the expected value of various combinations of these different data types are quantified, demonstrating that dependencies between different elements of a structural integrity management system dictate expected optimal data collection planning. In summary, system-level decision making, requires system-level models.

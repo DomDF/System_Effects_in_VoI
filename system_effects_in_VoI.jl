@@ -1,17 +1,18 @@
-#
-# "System Effects in Identifying Risk-Optimal Data Requirements for Digital Twins of Structures"
-#  Paper submitted to the journal of Reliability Engineering & System Safety
-#  Domenic Di Francesco, PhD, CEng (MIMechE)
-#  The Alan Turing Institute, University of Cambridge
-#  
-#  Accompanying Julia code to set-up and run calculations
-#
+#=
+    "System Effects in Identifying Risk-Optimal Data Requirements for Digital Twins of Structures"
+    Paper submitted to the journal of Reliability Engineering & System Safety
+    
+    Accompanying Julia code to set-up and run calculations
+   
+    Domenic Di Francesco, PhD, CEng (MIMechE)
+    The Alan Turing Institute, University of Cambridge
+=#
 
-######################################################
-#
-# Loading libraries
-#
-######################################################
+#=
+
+Loading libraries
+
+=#
 
 # For describing probabilistic models
 using Distributions, Turing, Random, LatinHypercubeSampling, Copulas
@@ -20,13 +21,14 @@ using JuMP, HiGHS, Gurobi, DecisionProgramming, LinearAlgebra
 # For working with data
 using CSV, DataFrames, DataFramesMeta
 
-Gurobi.Env()
+#=
 
-######################################################
-#
-# Required functions
-#
-######################################################
+Required functions
+
+=#
+
+# Find the number of allowable cycles at a specified (constant-amplitude) stress range
+# using the SN curves from BS7608
 
 function D_7608(S_MPa::Float64)
     return (Normal(log(10, 3.988 * 10^12) - 3*log(10, S_MPa), 0.2095))
@@ -36,15 +38,19 @@ function F2_7608(S_MPa::Float64)
     return (Normal(log(10, 1.231 * 10^12) - 3*log(10, S_MPa), 0.2279))
 end
 
+# Draw latin hypercube samples from a distribution
+
 function draw_lhs(dist, n::Int; reprod::Int = 240819)
     Random.seed!(reprod)
     samples = randomLHC(n + 2, 1) |>
-        x -> scaleLHC(x, [(0, 1)]) |>
-        x -> quantile(dist, x)[:,1] |>
-        x -> filter(!∈((-Inf, Inf)), x) |>
-        x -> [x[i] for i in 1:length(x) if abs(x[i]) >= 10^-10]
+        lhc -> scaleLHC(lhc, [(0, 1)]) |>
+        lhc -> quantile(dist, lhc)[:,1] |>
+        q -> filter(!∈((-Inf, Inf)), q) |>
+        q -> [q[i] for i in 1:length(q) if abs(q[i]) >= 10^-10]
     return samples
 end
+
+# Find the equivalent normal distribution parameters from lognormal distribution parameters
 
 function get_Norm_param(log_μ::Float64, log_σ::Float64)
     mean = exp(log_μ + 1/2 * log_σ^2)
@@ -52,17 +58,48 @@ function get_Norm_param(log_μ::Float64, log_σ::Float64)
     return (μ = mean, σ = sd)
 end
 
+# Find the equivalent lognormal distribution parameters from normal distribution parameters
+
 function get_LogNorm_params(μ::Float64, σ::Float64)
     log_sd = √(log(1 + σ^2 / μ^2))
     log_mean = log(μ) - 1/2 * log_sd^2
     return (log_μ = log_mean, log_σ = log_sd)
 end
 
+# Generate an n-dimensional covariance matrix
+
+function Σ_mat(n::Int64, ρᵩ::Vector{Float64}, σ::Vector{Float64})
+    @assert length(ρᵩ) == n*(n-1)/2; @assert length(σ) == n
+
+    ρ_mat = Matrix{Float64}(I, n, n); Σ = zeros(n, n); i = 1
+    
+    for col ∈ 1:n, row ∈ 1:n
+        if row > col
+            ρ_mat[row, col] = ρᵩ[i]
+            i += 1
+        elseif col > row
+            ρ_mat[row, col] = ρ_mat[col, row]
+        end
+        Σ[row, col] = row == col ? ρ_mat[row, col] * σ[row]^2 : 
+                                   ρ_mat[row, col] * σ[row] * σ[col]
+    end
+
+    return Σ
+end
+
 function cov_mat_2d(ρ::Float64, σ₁::Float64, σ₂::Float64)
     return([σ₁^2 ρ*σ₁*σ₂; ρ*σ₁*σ₂ σ₂^2])
 end
 
+#= 
+Number of stress cycles per year for a rail bridge, which operates:
+  - 10 trains per hour, 18 hours per day, on weekdays
+  - 8 trains per hour, 18 hours per day, on weekends
+=#
+
 n_baseline = (5 * 52 * 18 * 10) + (2 * 52 * 18 * 8)
+
+# Find the probability of failure (PoF) in n years, conditional on available interventions
 
 function get_PoF(;n_years::Int = 1, n_cycles::Int = n_baseline,
                 stress_samples::Vector{Float64} = prior_samples_df.stress,
@@ -101,6 +138,9 @@ function get_PoF(;n_years::Int = 1, n_cycles::Int = n_baseline,
     return(DataFrame(ΔPoF = minimum([1, (1 - (1 - ΔPoF)^n_years)]), βₛ = βₛ, βᵣ = βᵣ, γᵣ = γᵣ))
 end
 
+# Find the probability of failure (PoF) in n years, conditional on available interventions
+
+
 function gen_PoF_Dict(n; stress_samples::Vector{Float64}=prior_samples_df.stress, strength_samples::Vector{Float64}=prior_samples_df.σY, SCF_samples::Vector{Float64}=prior_samples_df.SCF)
     PoF_dict = Dict()
     args = Dict(:n_years => n, :stress_samples => stress_samples, 
@@ -119,11 +159,11 @@ function gen_PoF_Dict(n; stress_samples::Vector{Float64}=prior_samples_df.stress
     return PoF_dict
 end
 
-######################################################
-#
-# Bayesian models
-#
-######################################################
+#=
+
+Bayesian models
+
+=#
 
 @model function SN_model(; N_meas::Int, log_S::Vector{Float64}, log_N::Vector{Float64})
 
@@ -139,13 +179,13 @@ end
 
 end
 
-######################################################
-#
-# Setting up inputs
-#
-######################################################
+#=
 
-pwd(); cd("/Users/ddifrancesco/Library/CloudStorage/OneDrive-TheAlanTuringInstitute/Bridge_SHM")
+Setting up inputs
+
+=#
+
+# Simulate test data from BS7608 SN curves, accounting for epistemic uncertainty, using a Bayesian model
 
 sim_SN_data_df = DataFrame(); prng = MersenneTwister(240819)
 for S in 80:5:120
@@ -163,37 +203,43 @@ SN_post_df = SN_model(N_meas = nrow(sim_SN_data_df),
     x -> DataFrame(x) |>
     x -> @select(x, :iteration, :chain, :C, :m, :σ)
 
+# Specify prior models for load, SCF, and yield strength
+
 μ_l = Normal(50, 5); σ_l_params = get_LogNorm_params(6.0, 3.0)
 μ_str = Normal(400, 20); σ_str_params = get_LogNorm_params(10.0, 3.0)
 α_scf = Normal(2, 1/2) |> x -> truncated(x, lower = 0); θ_scf = Normal(1/2, 1/2) |> x -> truncated(x, lower = 0)
 
 ρ_cop = 2/3
 
-prior_df = DataFrame(
-    μ_l = draw_lhs(μ_l, 100),
-    σ_l = draw_lhs(LogNormal(σ_l_params.log_μ, σ_l_params.log_σ), 100),
-    μ_str = draw_lhs(μ_str, 100),
-    σ_str = draw_lhs(LogNormal(σ_str_params.log_μ, σ_str_params.log_σ), 100), 
-    α_SCF = draw_lhs(α_scf, 100),
-    θ_SCF = draw_lhs(θ_scf, 100)
-) |>
-    x -> @rtransform(x, :load = Normal(:μ_l, :σ_l)) |>
-    x -> @rtransform(x, :load_samples = draw_lhs(:load, 100)) |>
-    x -> @rtransform(x, :SCF_var = :α_SCF * :θ_SCF^2) |>
-    x -> @rtransform(x, :G_cop = GaussianCopula(cov_mat_2d(ρ_cop, :σ_str, √:SCF_var))) |>
-    x -> @rtransform(x, :SD = SklarDist(:G_cop, 
-                                        (truncated(Normal(:μ_str, :σ_str), lower = 0), 
-                                        censored(Gamma(:α_SCF, :θ_SCF), lower = 1)))) |>
-    x -> @rtransform(x, :strength_samples = rand(MersenneTwister(240819), :SD, 100)[1, :]) |>
-    x -> @rtransform(x, :SCF_samples = rand(MersenneTwister(240819), :SD, 100)[2,:])
+prior_df = DataFrame(μ_l = draw_lhs(μ_l, 100),
+                     σ_l = draw_lhs(LogNormal(σ_l_params.log_μ, σ_l_params.log_σ), 100),
+                     μ_str = draw_lhs(μ_str, 100),
+                     σ_str = draw_lhs(LogNormal(σ_str_params.log_μ, σ_str_params.log_σ), 100),
+                     α_SCF = draw_lhs(α_scf, 100),
+                     θ_SCF = draw_lhs(θ_scf, 100)) |>
+    df -> @rtransform(df, :load = Normal(:μ_l, :σ_l)) |>
+    df -> @rtransform(df, :load_samples = draw_lhs(:load, 100)) |>
+    df -> @rtransform(df, :SCF_var = :α_SCF * :θ_SCF^2) |>
+    df -> @rtransform(df, :G_cop = GaussianCopula(Σ_mat(2, [ρ_cop], [:σ_str, √:SCF_var]))) |>
+    df -> @rtransform(df, :SD = SklarDist(:G_cop, 
+                                         (truncated(Normal(:μ_str, :σ_str), lower = 0), 
+                                         censored(Gamma(:α_SCF, :θ_SCF), lower = 1)))) |>
+    df -> @rtransform(df, :strength_samples = rand(MersenneTwister(240819), :SD, 100)[1, :]) |>
+    df -> @rtransform(df, :SCF_samples = rand(MersenneTwister(240819), :SD, 100)[2,:])
 
-prior_samples_df = DataFrame(
-    stress = reduce(vcat, prior_df.load_samples),
-    σY = reduce(vcat, prior_df.strength_samples),
-    SCF = reduce(vcat, prior_df.SCF_samples)
-)
+prior_samples_df = prior_df |>
+    df -> DataFrame(stress = reduce(vcat, df.load_samples),
+                    σY = reduce(vcat, df.strength_samples),
+                    SCF = reduce(vcat, df.SCF_samples))
 
-CSV.write("prior_samples.csv", prior_samples_df)
+#= 
+Effect of each mitigation:
+ - strengthening reduces applied stress (e.g. by increasing area)
+ - replacing the component reduces the SCF due to misalignment to 1
+ - reducing operation reduces the number of stress cycles that the component sees
+
+Costs are defined below.
+=#
 
 n_years = 3; site_visit = 0.01; cost_strengthen = 0.025; cost_replace = 0.075; cost_reduce = 0.05
 
@@ -211,9 +257,77 @@ maint_values = [maint_opts[state] for state in maint_states]
 
 CoFs = [1, 0]
 
-# strengthening reduces applied stress (e.g. by increasing area)
-# replacing the component reduces the SCF due to misalignment to 1
-# reducing operation reduces the number of stress cycles that the component sees
+#=
+Create a function to solve the decision problem as an influence diagram
+returning a dataframe of the expected optimal utility and associated decision
+=#
+
+function solve_id(;
+    stress_samples::Vector{Float64} = prior_samples_df.stress,
+    strength_samples::Vector{Float64} = prior_samples_df.σY,
+    SCF_samples::Vector{Float64} = prior_samples_df.SCF)
+
+    PoF_dict_y1 = gen_PoF_Dict(1,
+                               stress_samples = stress_samples, 
+                               strength_samples = strength_samples,
+                               SCF_samples = SCF_samples)
+
+    SIM = InfluenceDiagram()
+
+    add_node!(SIM, DecisionNode("maint", [], maint_states))
+    add_node!(SIM, ChanceNode("β", ["maint"], β_states))
+    add_node!(SIM, ValueNode("CoF", ["β"]))
+    add_node!(SIM, ValueNode("C_maint", ["maint"]))
+
+    generate_arcs!(SIM)
+
+    β = ProbabilityMatrix(SIM, "β")
+    
+    for i in maint_states
+        β[i, :] = [PoF_dict_y1[i] (1 - PoF_dict_y1[i])]
+    end
+
+    Cₘ = UtilityMatrix(SIM, "C_maint")
+    for i in maint_states
+        Cₘ[i] = maint_opts[i]
+    end
+
+    Cᵣ = UtilityMatrix(SIM, "CoF")
+    Cᵣ["Fail"] = 1
+    Cᵣ["Survive"] = 0
+
+    add_probabilities!(SIM, "β", β)
+    add_utilities!(SIM, "C_maint", Cₘ)
+    add_utilities!(SIM, "CoF", Cᵣ)
+
+    generate_diagram!(SIM)
+
+    SIM_model = Model()
+    set_optimizer(SIM_model, Gurobi.Optimizer)
+    set_optimizer_attribute(SIM_model, "threads", Threads.nthreads())
+    set_silent(SIM_model)
+
+    z = DecisionVariables(SIM_model, SIM)
+    EC = expected_value(SIM_model, SIM, 
+                        PathCompatibilityVariables(SIM_model, SIM, z))
+
+    @objective(SIM_model, Min, EC)
+    optimize!(SIM_model)
+
+    Z = DecisionStrategy(z)
+    U_dist = UtilityDistribution(SIM, Z)
+    
+    opt_df = DataFrame(a_opt = maint_states[argmax(Z.Z_d[1])],
+                       u_opt = LinearAlgebra.dot(U_dist.p, U_dist.u))
+
+    return(opt_df)
+
+end
+
+#=
+Create a function to solve the sequential decision problem as an influence diagram
+returning a dataframe of the expected optimal utility and associated decision
+=#
 
 function solve_multi_year_id(;
     n_years::Int = 3,
@@ -266,9 +380,6 @@ function solve_multi_year_id(;
 
     end
 
-    # The below matrices will always be symmetric - maybe this can be exploited somewhere
-    # e.g. only looking up PoFs for a lower triangular?
-
     β₁ = ProbabilityMatrix(multi_year_decision, "β1")
     for i in maint_states
         β₁[i, :] = [1-(1-PoF_dict_y1[i])
@@ -277,7 +388,6 @@ function solve_multi_year_id(;
 
     β₂ = ProbabilityMatrix(multi_year_decision, "β2")
     for i in maint_states, j in maint_states
-        #println([i], [j])
         β₂[i, j, :] = [1-(1-PoF_dict_y1[i])*(1-PoF_dict_y1[j])
                          (1-PoF_dict_y1[i])*(1-PoF_dict_y1[j])]
     end
@@ -294,7 +404,6 @@ function solve_multi_year_id(;
 
     generate_diagram!(multi_year_decision)
 
-    # Define and run solver
     multi_year_model = Model(Gurobi.Optimizer)
     set_optimizer_attribute(multi_year_model, "threads", Threads.nthreads())
     set_silent(multi_year_model)
@@ -306,11 +415,9 @@ function solve_multi_year_id(;
     @objective(multi_year_model, Min, EC)
     optimize!(multi_year_model)
 
-    # Process results
     Z = DecisionStrategy(z)
     U_dist = UtilityDistribution(multi_year_decision, Z)
 
-    # print_decision_strategy(multi_year_decision, Z,  StateProbabilities(multi_year_decision, Z))
     opt_df = DataFrame()
     for n in 1:n_years
         colname = "a_opt$n"
@@ -318,72 +425,6 @@ function solve_multi_year_id(;
     end
 
     opt_df.u_opt = [LinearAlgebra.dot(U_dist.p, U_dist.u)]
-
-    return(opt_df)
-
-end
-
-function solve_id(;
-    stress_samples::Vector{Float64} = prior_samples_df.stress,
-    strength_samples::Vector{Float64} = prior_samples_df.σY,
-    SCF_samples::Vector{Float64} = prior_samples_df.SCF)
-
-    PoF_dict_y1 = gen_PoF_Dict(1,
-                               stress_samples = stress_samples, 
-                               strength_samples = strength_samples,
-                               SCF_samples = SCF_samples)
-
-    SIM = InfluenceDiagram()
-
-    add_node!(SIM, DecisionNode("maint", [], maint_states))
-    add_node!(SIM, ChanceNode("β", ["maint"], β_states))
-    add_node!(SIM, ValueNode("CoF", ["β"]))
-    add_node!(SIM, ValueNode("C_maint", ["maint"]))
-
-    generate_arcs!(SIM)
-
-    β = ProbabilityMatrix(SIM, "β")
-    
-    for i in maint_states
-        β[i, :] = [PoF_dict_y1[i] (1 - PoF_dict_y1[i])]
-    end
-
-    Cₘ = UtilityMatrix(SIM, "C_maint")
-    for i in maint_states
-        Cₘ[i] = maint_opts[i]
-    end
-
-    Cᵣ = UtilityMatrix(SIM, "CoF")
-    Cᵣ["Fail"] = 1
-    Cᵣ["Survive"] = 0
-
-    add_probabilities!(SIM, "β", β)
-    add_utilities!(SIM, "C_maint", Cₘ)
-    add_utilities!(SIM, "CoF", Cᵣ)
-
-    generate_diagram!(SIM)
-
-    # Define and run solver
-    SIM_model = Model()
-    set_optimizer(SIM_model, Gurobi.Optimizer)
-    set_optimizer_attribute(SIM_model, "threads", Threads.nthreads())
-    set_silent(SIM_model)
-
-    z = DecisionVariables(SIM_model, SIM)
-    EC = expected_value(SIM_model, SIM, 
-                        PathCompatibilityVariables(SIM_model, SIM, z))
-
-    @objective(SIM_model, Min, EC)
-    optimize!(SIM_model)
-
-    # Process results
-    Z = DecisionStrategy(z)
-    U_dist = UtilityDistribution(SIM, Z)
-
-    # print_decision_strategy(SIM, Z,  StateProbabilities(SIM, Z))
-    
-    opt_df = DataFrame(a_opt = maint_states[argmax(Z.Z_d[1])],
-                       u_opt = LinearAlgebra.dot(U_dist.p, U_dist.u))
 
     return(opt_df)
 

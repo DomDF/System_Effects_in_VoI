@@ -46,7 +46,7 @@ function draw_lhs(dist, n::Int; reprod::Int = 240819)
         lhc -> scaleLHC(lhc, [(0, 1)]) |>
         lhc -> quantile(dist, lhc)[:,1] |>
         q -> filter(!∈((-Inf, Inf)), q) |>
-        q -> [q[i] for i in 1:length(q) if abs(q[i]) >= 10^-10]
+        q -> [q[i] for i ∈ 1:length(q) if abs(q[i]) >= 10^-10]
     return samples
 end
 
@@ -125,7 +125,7 @@ function get_PoF(;n_years::Int = 1, n_cycles::Int = n_baseline,
     end
 
     μ_pred = SN_post_df.C .- SN_post_df.m .* log.(10, x_pred * βₛ); y_pred = []
-    for i in 1:n_samples
+    for i ∈ 1:n_samples
         append!(y_pred, 
                 draw_lhs(Normal(μ_pred[i], SN_post_df.σ[i]), 100) |> x -> reduce(vcat, x))
     end
@@ -140,13 +140,15 @@ end
 
 # Find the probability of failure (PoF) in n years, conditional on available interventions
 
+function gen_PoF_Dict(n; stress_samples::Vector{Float64} = prior_samples_df.stress, 
+                      strength_samples::Vector{Float64} = prior_samples_df.σY, 
+                      SCF_samples::Vector{Float64}=prior_samples_df.SCF)
 
-function gen_PoF_Dict(n; stress_samples::Vector{Float64}=prior_samples_df.stress, strength_samples::Vector{Float64}=prior_samples_df.σY, SCF_samples::Vector{Float64}=prior_samples_df.SCF)
     PoF_dict = Dict()
     args = Dict(:n_years => n, :stress_samples => stress_samples, 
                 :strength_samples => strength_samples, :SCF_samples => SCF_samples)
 
-    Threads.@threads for (k,v) in (("no_action", Dict()), ("strengthen", Dict(:strengthen => true)), 
+    Threads.@threads for (k,v) ∈ (("no_action", Dict()), ("strengthen", Dict(:strengthen => true)), 
                   ("replace", Dict(:replace => true)), ("reduce_operation", Dict(:reduce_op => true)), 
                   ("strengthen_replace", Dict(:strengthen => true, :replace => true)), 
                   ("strengthen_reduce", Dict(:strengthen => true, :reduce_op => true)), 
@@ -173,7 +175,7 @@ Bayesian models
     σ ~ Exponential(1)
 
     # Likelihood
-    for n in 1:N_meas
+    for n ∈ 1:N_meas
         log_N[n] ~ Normal(C - m * log_S[n], σ)
     end
 
@@ -188,7 +190,7 @@ Setting up inputs
 # Simulate test data from BS7608 SN curves, accounting for epistemic uncertainty, using a Bayesian model
 
 sim_SN_data_df = DataFrame(); prng = MersenneTwister(240819)
-for S in 80:5:120
+for S ∈ 80:5:120
     S = convert(Float64, S)
     append!(sim_SN_data_df, 
             DataFrame(S_MPa = S, log_N = D_7608(S) |> x -> rand(prng, x, 1)))
@@ -199,33 +201,35 @@ n_samples = 10_000; n_chains = 4; n_mcmc = Int(n_samples/n_chains)
 SN_post_df = SN_model(N_meas = nrow(sim_SN_data_df), 
                       log_S = log.(10, sim_SN_data_df.S_MPa), 
                       log_N = sim_SN_data_df.log_N) |>
-    x -> sample(MersenneTwister(240819), x, NUTS(), MCMCThreads(), n_mcmc, n_chains) |>
-    x -> DataFrame(x) |>
-    x -> @select(x, :iteration, :chain, :C, :m, :σ)
+    model -> sample(MersenneTwister(240819), model, NUTS(), MCMCThreads(), n_mcmc, n_chains) |>
+    posterior -> DataFrame(posterior) |>
+    post_df -> @select(post_df, :iteration, :chain, :C, :m, :σ)
 
 # Specify prior models for load, SCF, and yield strength
 
 μ_l = Normal(50, 5); σ_l_params = get_LogNorm_params(6.0, 3.0)
 μ_str = Normal(400, 20); σ_str_params = get_LogNorm_params(10.0, 3.0)
-α_scf = Normal(2, 1/2) |> x -> truncated(x, lower = 0); θ_scf = Normal(1/2, 1/2) |> x -> truncated(x, lower = 0)
+α_scf = Normal(2, 1/2) |> x -> truncated(x, lower = 0); γ_scf = Normal(1/2, 1/2) |> x -> truncated(x, lower = 0)
 
-ρ_cop = 2/3
+ρ_cop = 2/3; n_lhc = 100
 
-prior_df = DataFrame(μ_l = draw_lhs(μ_l, 100),
-                     σ_l = draw_lhs(LogNormal(σ_l_params.log_μ, σ_l_params.log_σ), 100),
-                     μ_str = draw_lhs(μ_str, 100),
-                     σ_str = draw_lhs(LogNormal(σ_str_params.log_μ, σ_str_params.log_σ), 100),
-                     α_SCF = draw_lhs(α_scf, 100),
-                     θ_SCF = draw_lhs(θ_scf, 100)) |>
+prior_df = DataFrame(μ_l = draw_lhs(μ_l, n_lhc),
+                     σ_l = draw_lhs(LogNormal(σ_l_params.log_μ, σ_l_params.log_σ), n_lhc),
+                     μ_str = draw_lhs(μ_str, n_lhc),
+                     σ_str = draw_lhs(LogNormal(σ_str_params.log_μ, σ_str_params.log_σ), n_lhc),
+                     α_SCF = draw_lhs(α_scf, n_lhc),
+                     γ_SCF = draw_lhs(γ_scf, n_lhc)) |>
     df -> @rtransform(df, :load = Normal(:μ_l, :σ_l)) |>
-    df -> @rtransform(df, :load_samples = draw_lhs(:load, 100)) |>
-    df -> @rtransform(df, :SCF_var = :α_SCF * :θ_SCF^2) |>
-    df -> @rtransform(df, :G_cop = GaussianCopula(Σ_mat(2, [ρ_cop], [:σ_str, √:SCF_var]))) |>
+    df -> @rtransform(df, :load_samples = draw_lhs(:load, n_lhc)) |>
+    df -> @rtransform(df, :SCF_var = :α_SCF * :γ_SCF^2) |>
+    df -> @rtransform(df, :G_cop = GaussianCopula(cov_mat_2d(ρ_cop, :σ_str, √:SCF_var))) |>
+#    df -> @rtransform(df, :Σ = Σ_mat(2, [ρ_cop], [:σ_str, √:SCF_var])) |> 
+#    df -> @rtransform(df, :G_cop = GaussianCopula(:Σ)) |>
     df -> @rtransform(df, :SD = SklarDist(:G_cop, 
                                          (truncated(Normal(:μ_str, :σ_str), lower = 0), 
-                                         censored(Gamma(:α_SCF, :θ_SCF), lower = 1)))) |>
-    df -> @rtransform(df, :strength_samples = rand(MersenneTwister(240819), :SD, 100)[1, :]) |>
-    df -> @rtransform(df, :SCF_samples = rand(MersenneTwister(240819), :SD, 100)[2,:])
+                                         censored(Gamma(:α_SCF, :γ_SCF), lower = 1)))) |>
+    df -> @rtransform(df, :strength_samples = rand(MersenneTwister(240819), :SD, n_lhc)[1, :]) |>
+    df -> @rtransform(df, :SCF_samples = rand(MersenneTwister(240819), :SD, n_lhc)[2,:])
 
 prior_samples_df = prior_df |>
     df -> DataFrame(stress = reduce(vcat, df.load_samples),
@@ -251,7 +255,7 @@ maint_opts = Dict("no_action" => 0, "strengthen" => cost_strengthen + site_visit
                   "strengthen_replace_reduce" => cost_strengthen + cost_replace + cost_reduce + site_visit)
 
 maint_states = keys(maint_opts) |> x -> collect(x)
-maint_values = [maint_opts[state] for state in maint_states]
+maint_values = [maint_opts[state] for state ∈ maint_states]
 
 β_states = ["Fail", "Survive"]
 
@@ -283,12 +287,12 @@ function solve_id(;
 
     β = ProbabilityMatrix(SIM, "β")
     
-    for i in maint_states
+    for i ∈ maint_states
         β[i, :] = [PoF_dict_y1[i] (1 - PoF_dict_y1[i])]
     end
 
     Cₘ = UtilityMatrix(SIM, "C_maint")
-    for i in maint_states
+    for i ∈ maint_states
         Cₘ[i] = maint_opts[i]
     end
 
@@ -305,7 +309,7 @@ function solve_id(;
     SIM_model = Model()
     set_optimizer(SIM_model, Gurobi.Optimizer)
     set_optimizer_attribute(SIM_model, "threads", Threads.nthreads())
-    set_silent(SIM_model)
+    # set_silent(SIM_model)
 
     z = DecisionVariables(SIM_model, SIM)
     EC = expected_value(SIM_model, SIM, 
@@ -342,7 +346,7 @@ function solve_multi_year_id(;
 
     multi_year_decision = InfluenceDiagram()
 
-    for i in 1:n_years
+    for i ∈ 1:n_years
         add_node!(multi_year_decision, DecisionNode("maint$i", [], maint_states))
         add_node!(multi_year_decision, ValueNode("C_maint$i", ["maint$i"]))
 
@@ -350,7 +354,7 @@ function solve_multi_year_id(;
             add_node!(multi_year_decision, ChanceNode("β$i", ["maint$i"], β_states))
             add_node!(multi_year_decision, ValueNode("CoF$i", ["β$i"]))
         else
-            deps = ["maint" * string(j) for j in 1:i]
+            deps = ["maint" * string(j) for j ∈ 1:i]
 
             add_node!(multi_year_decision, ChanceNode("β$i", deps, β_states))
             add_node!(multi_year_decision, ValueNode("CoF$i", ["β$i"]))
@@ -359,7 +363,7 @@ function solve_multi_year_id(;
 
     generate_arcs!(multi_year_decision)
 
-    for n in 1:n_years
+    for n ∈ 1:n_years
 
         Cₘ = UtilityMatrix(multi_year_decision, "C_maint$n")
         Cₘ["no_action"] = maint_opts["no_action"]
@@ -381,19 +385,19 @@ function solve_multi_year_id(;
     end
 
     β₁ = ProbabilityMatrix(multi_year_decision, "β1")
-    for i in maint_states
+    for i ∈ maint_states
         β₁[i, :] = [1-(1-PoF_dict_y1[i])
                       (1 - PoF_dict_y1[i])]
     end
 
     β₂ = ProbabilityMatrix(multi_year_decision, "β2")
-    for i in maint_states, j in maint_states
+    for i ∈ maint_states, j ∈ maint_states
         β₂[i, j, :] = [1-(1-PoF_dict_y1[i])*(1-PoF_dict_y1[j])
                          (1-PoF_dict_y1[i])*(1-PoF_dict_y1[j])]
     end
 
     β₃ = ProbabilityMatrix(multi_year_decision, "β3")
-    for i in maint_states, j in maint_states, k in maint_states
+    for i ∈ maint_states, j ∈ maint_states, k ∈ maint_states
         β₃[i, j, k, :] = [1-(1-PoF_dict_y1[i])*(1-PoF_dict_y1[j])*(1-PoF_dict_y1[k]) 
                             (1-PoF_dict_y1[i])*(1-PoF_dict_y1[j])*(1-PoF_dict_y1[k])]
     end
@@ -406,7 +410,7 @@ function solve_multi_year_id(;
 
     multi_year_model = Model(Gurobi.Optimizer)
     set_optimizer_attribute(multi_year_model, "threads", Threads.nthreads())
-    set_silent(multi_year_model)
+    # set_silent(multi_year_model)
 
     z = DecisionVariables(multi_year_model, multi_year_decision)
     EC = expected_value(multi_year_model, multi_year_decision, 
@@ -419,7 +423,7 @@ function solve_multi_year_id(;
     U_dist = UtilityDistribution(multi_year_decision, Z)
 
     opt_df = DataFrame()
-    for n in 1:n_years
+    for n ∈ 1:n_years
         colname = "a_opt$n"
         opt_df[!, colname] = [maint_states[argmax(Z.Z_d[n])]]
     end
@@ -428,4 +432,89 @@ function solve_multi_year_id(;
 
     return(opt_df)
 
+end
+
+#=
+
+Running VoPI analysis
+
+=#
+
+function VoPI(;data::String, n_step::Int64 = 10)
+    data_types = ["none", "inspection", "testing", "SHM", "inspection + testing", 
+                  "inspection + SHM", "testing + SHM", "inspection + testing + SHM"]
+    @assert data ∈ data_types
+
+    iter_df = Vector{DataFrame}(undef, nrow(prior_samples_df) ÷ n_step)
+
+    if data == "none"
+        VoPI_df = solve_id() |>
+            df -> @rtransform(df, :stress_meas = missing) |>
+            df -> @rtransform(df, :strength_meas = missing) |>
+            df -> @rtransform(df, :SCF_meas = missing)
+    
+    else
+        progress = 0
+        for i in 1:size(iter_df)
+            inspection_data = occursin("inspection", data) ? [prior_samples_df.SCF[i]] : prior_samples_df.SCF
+            test_data = occursin("testing", data) ? [prior_samples_df.σY[i]] : prior_samples_df.σY
+            SHM_data = occursin("SHM", data) ? [prior_samples_df.stress[i]] : prior_samples_df.stress
+
+            iter_df[i] = solve_id(SCF_samples = inspection_data, stress_samples = SHM_data, strength_samples = test_data) |>
+                df -> @rtransform(df, :stress_meas = length(SHM_data) == 1 ? prior_samples_df.stress[i] : missing) |>
+                df -> @rtransform(df, :strength_meas = length(test_data) == 1 ? prior_samples_df.σY[i] : missing) |>
+                df -> @rtransform(df, :SCF_meas = length(inspection_data) == 1 ? prior_samples_df.SCF[i] : missing)
+            progress += n_step
+            println("\n\n", progress / nrow(prior_samples_df) * 100, "% complete\n\n")
+        end
+
+        VoPI_df = DataFrame()
+        for df in iter_df
+            append!(VoPI_df, df)
+        end
+    end
+
+   return VoPI_df 
+end
+
+# prior decision analysis
+prior_decision = VoPI(data = "none")
+
+#=
+Running sensitivity analysis, demonstrating effect of measurement uncertainty on VoI
+=# 
+
+@model function SHM(stress_meas::Float64, ϵ::Float64)
+    # Define the prior distributions
+    μ_stress ~ Normal(μ_l.μ , μ_l.σ)
+    σ_stress ~ LogNormal(σ_l_params.log_μ, σ_l_params.log_σ)
+    stress ~ Normal(μ_stress, σ_stress)
+
+    # Define the likelihood
+    stress_meas ~ Normal(stress, ϵ)
+end
+
+n_samples = 10_000; n_chains = 4; n_mcmc = Int(n_samples/n_chains); VoSHM_df = DataFrame()
+
+for meas_error ∈ [1.0, 5.0, 10.0, 20.0]
+    progress = 1
+    for i ∈ 1:length(VoSHM_iter_df)
+        σ_meas = prior_samples_df.stress[i]
+        SHM(σ_meas, meas_error) |>
+            # Sample from joint posterior π(θ|z) of load model conditional on sensor data
+            model -> sample(MersenneTwister(240819), model, NUTS(), 
+                            MCMCThreads(), n_mcmc, n_chains) |>
+            posterior -> DataFrame(posterior) |>
+            #= draw samples from posterior predicitve distribution of stress
+            π(zₚ|z) = ∫ π(zₚ|θ) × π(θ|z) dθ =#
+            posterior_df -> reduce(vcat, posterior_df.stress) |>
+            #= Propagate through influence diagram and find Exp. optimal utility (and intervention)
+            a* = argmax_{a ∈ A} E[u(a, π(θ∣z))] =#
+            σ -> solve_id(stress_samples = σ) |>
+            df -> @rtransform(df, :meas = σ_meas, error = meas_error) |>
+            df -> append!(VoSHM_df, df)
+        progress += 1
+        println("\n\n Running VoSHM with error: $meas_error \n", 
+                100 * progress / length(VoSHM_iter_df) |> x -> round(x, digits = 2), "% complete")
+    end
 end

@@ -2,13 +2,7 @@
 
 This repository is associated with a research paper that has been submitted to the Journal of Reliability Engineering & System Safety.
 The file "system_effects_in_VoI.pdf" is a draft copy of the paper.
-The file "system_effects_in_VoI.jl" is a Julia file that contains all of the calculations used to produce the results in the paper. The file is broken down into the following sections:
- - Loading libraries
- - Required functions
- - Bayesian models
- - Setting up inputs
- - Defining influence diagrams
- - Running VoI calculations
+The file "system_effects_in_VoI.jl" is a Julia file that contains all of the calculations used to produce the results in the paper. 
  
 Abstract:
 

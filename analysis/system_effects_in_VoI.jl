@@ -8,11 +8,9 @@
     The Alan Turing Institute, University of Cambridge
 =#
 
-#=
-
+#= ***************************************************************************
 Loading libraries
-
-=#
+*************************************************************************** =#
 
 # For describing probabilistic models
 using Distributions, Turing, Random, LatinHypercubeSampling, Copulas
@@ -21,11 +19,9 @@ using JuMP, HiGHS, Gurobi, DecisionProgramming, LinearAlgebra
 # For working with data
 using CSV, DataFrames, DataFramesMeta
 
-#=
-
+#= ***************************************************************************
 Required functions
-
-=#
+*************************************************************************** =#
 
 # Find the number of allowable cycles at a specified (constant-amplitude) stress range
 # using the SN curves from BS7608
@@ -87,6 +83,8 @@ function Σ_mat(n::Int64, ρᵩ::Vector{Float64}, σ::Vector{Float64})
     return Σ
 end
 
+# Generate an 2-dimensional covariance matrix
+
 function cov_mat_2d(ρ::Float64, σ₁::Float64, σ₂::Float64)
     return([σ₁^2 ρ*σ₁*σ₂; ρ*σ₁*σ₂ σ₂^2])
 end
@@ -99,7 +97,16 @@ Number of stress cycles per year for a rail bridge, which operates:
 
 n_baseline = (5 * 52 * 18 * 10) + (2 * 52 * 18 * 8)
 
-# Find the probability of failure (PoF) in n years, conditional on available interventions
+#=
+
+Find the probability of failure (PoF) in n years, conditional on available interventions
+
+Effect of each mitigation:
+ - strengthening reduces applied stress (e.g. by increasing area)
+ - replacing the component reduces the SCF due to misalignment to 1
+ - reducing operation reduces the number of stress cycles that the component sees
+
+=#
 
 function get_PoF(;n_years::Int = 1, n_cycles::Int = n_baseline,
                 stress_samples::Vector{Float64} = prior_samples_df.stress,
@@ -161,33 +168,42 @@ function gen_PoF_Dict(n; stress_samples::Vector{Float64} = prior_samples_df.stre
     return PoF_dict
 end
 
-#=
-
+#= ***************************************************************************
 Bayesian models
-
-=#
+*************************************************************************** =#
 
 @model function SN_model(; N_meas::Int, log_S::Vector{Float64}, log_N::Vector{Float64})
 
-    # Priors
+    # Define the prior distributions
     C ~ Normal(13, 3)
     m ~ truncated(Normal(3, 2), lower = 0)
     σ ~ Exponential(1)
 
-    # Likelihood
+    # Define the likelihood
     for n ∈ 1:N_meas
         log_N[n] ~ Normal(C - m * log_S[n], σ)
     end
 
 end
 
-#=
+@model function SHM(stress_meas::Float64, ϵ::Float64)
+    # Define the prior distributions
+    μ_stress ~ Normal(μ_l.μ , μ_l.σ)
+    σ_stress ~ LogNormal(σ_l_params.log_μ, σ_l_params.log_σ)
+    stress ~ Normal(μ_stress, σ_stress)
 
+    # Define the likelihood
+    stress_meas ~ Normal(stress, ϵ)
+end
+
+#= ***************************************************************************
 Setting up inputs
+*************************************************************************** =#
 
+#=
+Simulate test data from BS7608 SN curves, 
+...accounting for epistemic uncertainty, using a Bayesian model
 =#
-
-# Simulate test data from BS7608 SN curves, accounting for epistemic uncertainty, using a Bayesian model
 
 sim_SN_data_df = DataFrame(); prng = MersenneTwister(240819)
 for S ∈ 80:5:120
@@ -223,8 +239,6 @@ prior_df = DataFrame(μ_l = draw_lhs(μ_l, n_lhc),
     df -> @rtransform(df, :load_samples = draw_lhs(:load, n_lhc)) |>
     df -> @rtransform(df, :SCF_var = :α_SCF * :γ_SCF^2) |>
     df -> @rtransform(df, :G_cop = GaussianCopula(cov_mat_2d(ρ_cop, :σ_str, √:SCF_var))) |>
-#    df -> @rtransform(df, :Σ = Σ_mat(2, [ρ_cop], [:σ_str, √:SCF_var])) |> 
-#    df -> @rtransform(df, :G_cop = GaussianCopula(:Σ)) |>
     df -> @rtransform(df, :SD = SklarDist(:G_cop, 
                                          (truncated(Normal(:μ_str, :σ_str), lower = 0), 
                                          censored(Gamma(:α_SCF, :γ_SCF), lower = 1)))) |>
@@ -236,14 +250,8 @@ prior_samples_df = prior_df |>
                     σY = reduce(vcat, df.strength_samples),
                     SCF = reduce(vcat, df.SCF_samples))
 
-#= 
-Effect of each mitigation:
- - strengthening reduces applied stress (e.g. by increasing area)
- - replacing the component reduces the SCF due to misalignment to 1
- - reducing operation reduces the number of stress cycles that the component sees
 
-Costs are defined below.
-=#
+# Define the costs of interventions for use in the decision problem
 
 n_years = 3; site_visit = 0.01; cost_strengthen = 0.025; cost_replace = 0.075; cost_reduce = 0.05
 
@@ -271,11 +279,13 @@ function solve_id(;
     strength_samples::Vector{Float64} = prior_samples_df.σY,
     SCF_samples::Vector{Float64} = prior_samples_df.SCF)
 
+    # Find PoFs from prior models and measurement data
     PoF_dict_y1 = gen_PoF_Dict(1,
                                stress_samples = stress_samples, 
                                strength_samples = strength_samples,
                                SCF_samples = SCF_samples)
 
+    # Initialise influence diagram and add nodes
     SIM = InfluenceDiagram()
 
     add_node!(SIM, DecisionNode("maint", [], maint_states))
@@ -285,17 +295,20 @@ function solve_id(;
 
     generate_arcs!(SIM)
 
+    # Populate structural reliability node(s) with PoFs
     β = ProbabilityMatrix(SIM, "β")
     
     for i ∈ maint_states
         β[i, :] = [PoF_dict_y1[i] (1 - PoF_dict_y1[i])]
     end
 
+    # Populate maintenance cost node(s)
     Cₘ = UtilityMatrix(SIM, "C_maint")
     for i ∈ maint_states
         Cₘ[i] = maint_opts[i]
     end
 
+    # Populate failre cost node(s)
     Cᵣ = UtilityMatrix(SIM, "CoF")
     Cᵣ["Fail"] = 1
     Cᵣ["Survive"] = 0
@@ -306,11 +319,12 @@ function solve_id(;
 
     generate_diagram!(SIM)
 
+    # Define JuMP model with solver using all available threads
     SIM_model = Model()
-    set_optimizer(SIM_model, Gurobi.Optimizer)
+    set_optimizer(SIM_model, Gurobi.Optimizer) # or HiGHS.Optimizer if no Gurobi license is available
     set_optimizer_attribute(SIM_model, "threads", Threads.nthreads())
-    # set_silent(SIM_model)
 
+    # Define decision variables and expected utility for optimisation
     z = DecisionVariables(SIM_model, SIM)
     EC = expected_value(SIM_model, SIM, 
                         PathCompatibilityVariables(SIM_model, SIM, z))
@@ -318,9 +332,11 @@ function solve_id(;
     @objective(SIM_model, Min, EC)
     optimize!(SIM_model)
 
+    # Extract a* and u* from the solution
     Z = DecisionStrategy(z)
     U_dist = UtilityDistribution(SIM, Z)
     
+    # Return results as a dataframe
     opt_df = DataFrame(a_opt = maint_states[argmax(Z.Z_d[1])],
                        u_opt = LinearAlgebra.dot(U_dist.p, U_dist.u))
 
@@ -339,11 +355,13 @@ function solve_multi_year_id(;
     strength_samples::Vector{Float64} = prior_samples_df.σY,
     SCF_samples::Vector{Float64} = prior_samples_df.SCF)
 
+    # Find PoFs from prior models and measurement data
     PoF_dict_y1 = gen_PoF_Dict(1,
                                stress_samples = stress_samples, 
                                strength_samples = strength_samples,
                                SCF_samples = SCF_samples)
 
+    # Initialise influence diagram and add nodes
     multi_year_decision = InfluenceDiagram()
 
     for i ∈ 1:n_years
@@ -363,6 +381,7 @@ function solve_multi_year_id(;
 
     generate_arcs!(multi_year_decision)
 
+    # Populate maintenance and failure cost node(s)
     for n ∈ 1:n_years
 
         Cₘ = UtilityMatrix(multi_year_decision, "C_maint$n")
@@ -384,6 +403,7 @@ function solve_multi_year_id(;
 
     end
 
+    # Populate structural reliability node with PoFs
     β₁ = ProbabilityMatrix(multi_year_decision, "β1")
     for i ∈ maint_states
         β₁[i, :] = [1-(1-PoF_dict_y1[i])
@@ -408,10 +428,11 @@ function solve_multi_year_id(;
 
     generate_diagram!(multi_year_decision)
 
+    # Define JuMP model with solver using all available threads
     multi_year_model = Model(Gurobi.Optimizer)
     set_optimizer_attribute(multi_year_model, "threads", Threads.nthreads())
-    # set_silent(multi_year_model)
 
+    # Define decision variables and expected utility for optimisation
     z = DecisionVariables(multi_year_model, multi_year_decision)
     EC = expected_value(multi_year_model, multi_year_decision, 
                         PathCompatibilityVariables(multi_year_model, multi_year_decision, z))
@@ -419,9 +440,11 @@ function solve_multi_year_id(;
     @objective(multi_year_model, Min, EC)
     optimize!(multi_year_model)
 
+    # Extract a* and u* from the solution
     Z = DecisionStrategy(z)
     U_dist = UtilityDistribution(multi_year_decision, Z)
 
+    # Return results as a dataframe
     opt_df = DataFrame()
     for n ∈ 1:n_years
         colname = "a_opt$n"
@@ -483,16 +506,6 @@ prior_decision = VoPI(data = "none")
 #=
 Running sensitivity analysis, demonstrating effect of measurement uncertainty on VoI
 =# 
-
-@model function SHM(stress_meas::Float64, ϵ::Float64)
-    # Define the prior distributions
-    μ_stress ~ Normal(μ_l.μ , μ_l.σ)
-    σ_stress ~ LogNormal(σ_l_params.log_μ, σ_l_params.log_σ)
-    stress ~ Normal(μ_stress, σ_stress)
-
-    # Define the likelihood
-    stress_meas ~ Normal(stress, ϵ)
-end
 
 n_samples = 10_000; n_chains = 4; n_mcmc = Int(n_samples/n_chains); VoSHM_df = DataFrame()
 

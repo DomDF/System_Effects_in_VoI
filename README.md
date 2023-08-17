@@ -1,8 +1,10 @@
 # System Effects in Identifying Risk-Optimal Data Requirements for Digital Twins of Structures
 
 This repository is associated with a research paper that has been submitted to the Journal of Reliability Engineering & System Safety.
-The file "system_effects_in_VoI.pdf" is a draft copy of the paper.
-The file "system_effects_in_VoI.jl" is a Julia file that contains all of the calculations used to produce the results in the paper. 
+The preprint is available here: link.
+
+Within the "analysis" folder, the file "system_effects_in_VoI.jl" is a Julia file that contains all of the calculations used to produce the results in the paper.
+Within the "results" folder, are the simulations used to estimate the expected value of various combinations of data collection activities. This is the raw data used to produce the visualisations in the paper.
  
 Abstract:
 

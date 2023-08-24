@@ -14,4 +14,4 @@ Value of Information (VoI) analysis is an established statistical framework for 
 
 ## Selected Figures:
 
-![Figure 10: Expected value of perfect inspection](figures/figure10)
+![Figure 10: Expected value of perfect inspection](figures/figure10.png)

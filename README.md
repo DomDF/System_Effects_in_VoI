@@ -6,7 +6,7 @@ The preprint is available here: link.
 Within the "analysis" folder, the file "system_effects_in_VoI.jl" is a Julia file that contains all of the calculations used to produce the results in the paper.
 Within the "results_files" folder, are the simulations used to estimate the expected value of various combinations of data collection activities. This is the raw data used to produce the visualisations in the paper.
  
-Abstract:
+## Abstract:
 
 Structural Health Monitoring (SHM) technologies offer much promise to the risk management of the built environment, and they are therefore an active area of research. However, information regarding material properties, such as toughness and strength is instead measured in destructive lab tests. Similarly, the presence of geometrical anomalies is more commonly detected and sized by inspection. Therefore, a risk-optimal combination should be sought, acknowledging that different scenarios will be associated with different data requirements.
 

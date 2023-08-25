@@ -3,7 +3,7 @@
 This repository is associated with a research paper that has been submitted to the Journal of Reliability Engineering & System Safety.
 The preprint is available here: link.
 
-Within the "analysis" folder, the file "system_effects_in_VoI.jl" is a Julia file that contains all of the calculations used to produce the results in the paper.
+Within the *analysis* folder, the file *system_effects_in_VoI.jl* is a Julia file that contains all of the calculations used to produce the results in the paper.
 Within the "results_files" folder, are the simulations used to estimate the expected value of various combinations of data collection activities. This is the raw data used to produce the visualisations in the paper.
  
 ## Abstract:
@@ -14,6 +14,11 @@ Value of Information (VoI) analysis is an established statistical framework for 
 
 ## Selected Figures
 
+Figure 9: Extension of "ECA triangle" (see dashed lines) to influence diagram representation of structural integrity management decision problem
 ![Figure 9](figures/figure9.png)
+
+Figure 10: Expected value of perfect inspection data
 ![Figure 10](figures/figure10.png)
+
+Figure 15: Sequences of optimal actions (w.r.t. expected utility) forecasting over a three-year period
 ![Figure 15](figures/figure15.png)

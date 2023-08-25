@@ -12,6 +12,3 @@ Structural Health Monitoring (SHM) technologies offer much promise to the risk m
 
 Value of Information (VoI) analysis is an established statistical framework for quantifying the expected benefit of a prospective data collection activity. In this paper the expected value of various combinations of inspection, SHM and testing are quantified, in the context of supporting risk management of a location of stress concentration in a railway bridge. The Julia code for this analysis (probabilistic models and influence diagrams) is made available. The system-level results differ from a simple linear sum of marginal VoI estimates, i.e. the expected value of collecting data from SHM and inspection together is not equal to the expected value of SHM data plus the expected value of inspection data. In summary, **system-level decision making, requires system-level models**.
 
-## Selected Figures:
-
-![Figure 10: Expected value of perfect inspection](figures/figure10.png)

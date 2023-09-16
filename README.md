@@ -3,8 +3,8 @@
 This repository is associated with a research paper that has been submitted to the Journal of Reliability Engineering & System Safety.
 The preprint is available here: https://arxiv.org/abs/2309.07695
 
-Within the *analysis* folder, the file *system_effects_in_VoI.jl* is a Julia file that contains all of the calculations used to produce the results in the paper.
-Within the "results_files" folder, are the simulations used to estimate the expected value of various combinations of data collection activities. This is the raw data used to produce the visualisations in the paper.
+Within the *analysis* folder, the file *system_effects_in_VoI.jl* contains all of the calculations used to produce the results in the paper.
+Within the *results_files* folder, are the simulations used to estimate the expected value of various combinations of data collection activities. This is the raw data used to produce the visualisations in the paper.
  
 ## Abstract:
 
